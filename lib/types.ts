@@ -34,7 +34,7 @@ export interface Candle {
 
 export type RegimeCode = "LIQUIDITY_EXPANSION" | "NEUTRAL" | "STAGFLATION" | "TIGHTENING";
 
-export type DataSource = "FRED" | "YAHOO" | "TWELVEDATA" | "BIS" | "CFTC" | "KRAKEN" | "FF" | "RSS";
+export type DataSource = "FRED" | "YAHOO" | "TWELVEDATA" | "BIS" | "CFTC" | "KRAKEN" | "FF" | "RSS" | "KALSHI";
 
 /** A real (delayed) quote for one terminal instrument. */
 export interface RealQuote {
@@ -201,11 +201,17 @@ export interface CentralBankRow {
 
 export interface FedMeeting {
   date: string;
+  /** CME: the ZQ contract, e.g. "ZQZ6". Kalshi: the event, e.g. "26DEC". */
   contract: string;
-  futuresPrice: number;
+  /** ZQ futures price; absent for Kalshi. */
+  futuresPrice?: number;
+  /** Expected fed funds rate after this meeting. */
   impliedRate: number;
-  /** Probability by cumulative move in bps relative to today's target, e.g. {-25: 0.64, 0: 0.36}. */
-  dist: { moveBps: number; prob: number }[];
+  /**
+   * Outcome probabilities in bps. CME: cumulative move from today's rate. Kalshi: this meeting's
+   * own decision. `atLeast` marks Kalshi's open-ended ">25bp" buckets (shown as 50+).
+   */
+  dist: { moveBps: number; prob: number; atLeast?: boolean }[];
   cutProb: number;
   holdProb: number;
   hikeProb: number;
@@ -260,6 +266,8 @@ export interface PolicyPayload {
   banks: CentralBankRow[];
   fed: { lower: number; upper: number; effr: number; effrAsOf: string; coreCpi: number };
   meetings: FedMeeting[];
+  /** Where `meetings` came from: CME fed funds futures (via Yahoo) or Kalshi's FOMC decision markets. */
+  meetingsSource: "CME" | "KALSHI" | null;
   balance: BalanceSheetPoint[];
 }
 

@@ -186,6 +186,92 @@ async function fedMeetingsFromFutures(effr: number, now: number): Promise<FedMee
   return out;
 }
 
+// ---------------------------------------------------------------- Kalshi FOMC markets → meeting probabilities
+
+// Kalshi (a CFTC-regulated exchange) lists a market per FOMC decision with five outcomes. Its
+// public market-data API needs no key and, unlike Yahoo, answers cloud servers. Prices are in
+// dollars per $1 contract, i.e. probabilities.
+const KALSHI_EVENTS = "https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=KXFEDDECISION&status=open&with_nested_markets=true&limit=20";
+const KALSHI_OUTCOME: Record<string, { bps: number; atLeast?: boolean }> = {
+  C26: { bps: -50, atLeast: true },
+  C25: { bps: -25 },
+  H0: { bps: 0 },
+  H25: { bps: 25 },
+  H26: { bps: 50, atLeast: true },
+};
+
+interface KalshiMarket {
+  ticker: string;
+  yes_bid_dollars?: string;
+  yes_ask_dollars?: string;
+  last_price_dollars?: string;
+}
+
+/** Mid of a two-sided quote; else the last trade. */
+function kalshiPrice(m: KalshiMarket): number | null {
+  const bid = Number(m.yes_bid_dollars);
+  const ask = Number(m.yes_ask_dollars);
+  if (bid > 0 && ask > 0 && ask >= bid) return (bid + ask) / 2;
+  const last = Number(m.last_price_dollars);
+  return Number.isFinite(last) && last >= 0 ? last : null;
+}
+
+/**
+ * Next six meetings. Probabilities are normalised to sum to 1 (bid/ask mids rarely do exactly).
+ * The implied path adds each meeting's expected move to EFFR — expectations add up whatever the
+ * correlation between meetings; ">25bp" outcomes count as 50bp, so it is a slight understatement
+ * when those carry weight.
+ */
+async function fedMeetingsFromKalshi(effr: number, now: number): Promise<FedMeeting[]> {
+  const res = await fetch(KALSHI_EVENTS, { headers: { "User-Agent": "macro-terminal/0.1", Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`Kalshi FOMC markets: HTTP ${res.status}`);
+  const body = (await res.json()) as { events?: { event_ticker: string; strike_date?: string; markets?: KalshiMarket[] }[] };
+  const events = (body.events ?? [])
+    .filter((e) => e.strike_date && Date.parse(e.strike_date) > now - 6 * 3600_000)
+    .sort((a, b) => Date.parse(a.strike_date!) - Date.parse(b.strike_date!))
+    .slice(0, 6);
+  const out: FedMeeting[] = [];
+  let rate = effr;
+  for (const e of events) {
+    const dist: FedMeeting["dist"] = [];
+    for (const m of e.markets ?? []) {
+      const o = KALSHI_OUTCOME[m.ticker.split("-").pop() ?? ""];
+      const p = kalshiPrice(m);
+      if (o && p !== null) dist.push({ moveBps: o.bps, prob: p, ...(o.atLeast ? { atLeast: true } : {}) });
+    }
+    const total = dist.reduce((s, d) => s + d.prob, 0);
+    if (dist.length < 3 || !(total > 0.5)) break; // thin or broken book: stop the path here
+    for (const d of dist) d.prob /= total;
+    dist.sort((a, b) => a.moveBps - b.moveBps);
+    const sum = (pred: (m: number) => boolean) => dist.filter((d) => pred(d.moveBps)).reduce((s, d) => s + d.prob, 0);
+    rate += dist.reduce((s, d) => s + (d.prob * d.moveBps) / 100, 0);
+    out.push({
+      date: e.strike_date!.slice(0, 10),
+      contract: e.event_ticker.split("-").pop() ?? e.event_ticker,
+      impliedRate: rate,
+      dist: dist.filter((d) => d.prob > 0.0005),
+      cutProb: sum((m) => m < 0),
+      holdProb: sum((m) => m === 0),
+      hikeProb: sum((m) => m > 0),
+    });
+  }
+  if (!out.length) throw new Error("Kalshi FOMC markets: no open meetings with prices");
+  return out;
+}
+
+/** CME futures when Yahoo answers (it blocks most cloud servers); Kalshi otherwise. */
+async function fedMeetings(effr: number, now: number): Promise<{ meetings: FedMeeting[]; source: "CME" | "KALSHI" }> {
+  try {
+    return { meetings: await fedMeetingsFromFutures(effr, now), source: "CME" };
+  } catch (err) {
+    try {
+      return { meetings: await fedMeetingsFromKalshi(effr, now), source: "KALSHI" };
+    } catch (err2) {
+      throw new Error(`${err instanceof Error ? err.message : err}; ${err2 instanceof Error ? err2.message : err2}`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- Balance sheets (monthly, USD trillions)
 
 async function balanceSheets(now: number): Promise<BalanceSheetPoint[]> {
@@ -287,24 +373,25 @@ async function pullPolicy(): Promise<PolicyPayload> {
       coreCpi: Math.round(coreYoY * 10) / 10,
     },
     meetings: [],
+    meetingsSource: null,
     balance: [],
   };
 }
 
 const policyCore = () => cached("live:policy", 15 * MIN, pullPolicy, 20_000);
-const fedFutures = (effr: number) => cached("live:fedfutures", 15 * MIN, () => fedMeetingsFromFutures(effr, Date.now()), 60_000);
+const fedPath = (effr: number) => cached("live:fedpath", 15 * MIN, () => fedMeetings(effr, Date.now()), 60_000);
 const balanceHistory = () => cached("live:balance", 6 * 60 * MIN, () => balanceSheets(Date.now()), 60_000);
 
 /**
- * Rates, CPI and the Fed range (BIS + FRED) are the core; fed funds futures (Yahoo only — no free
- * keyed source carries CME futures) and the balance-sheet history are attached when available, so
- * a failure in either leaves the rest of the policy panes working.
+ * Rates, CPI and the Fed range (BIS + FRED) are the core; meeting probabilities (CME futures via
+ * Yahoo, else Kalshi) and the balance-sheet history are attached when available, so a failure in
+ * either leaves the rest of the policy panes working.
  */
 export async function getPolicy(): Promise<PolicyPayload | null> {
   const core = await policyCore();
   if (!core) return null;
-  const [meetings, balance] = await Promise.all([fedFutures(core.fed.effr), balanceHistory()]);
-  return { ...core, meetings: meetings ?? [], balance: balance ?? [] };
+  const [path, balance] = await Promise.all([fedPath(core.fed.effr), balanceHistory()]);
+  return { ...core, meetings: path?.meetings ?? [], meetingsSource: path?.source ?? null, balance: balance ?? [] };
 }
 
 // ---------------------------------------------------------------- CFTC Commitments of Traders

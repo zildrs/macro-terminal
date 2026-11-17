@@ -74,7 +74,7 @@ export function RateMatrix() {
 
 // ---------------------------------------------------------------- Fed cut/hike probability
 
-const moveLabel = (bps: number) => (bps === 0 ? "HOLD" : bps < 0 ? `CUT ${-bps}` : `HIKE ${bps}`);
+const moveLabel = (bps: number, atLeast?: boolean) => (bps === 0 ? "HOLD" : `${bps < 0 ? "CUT" : "HIKE"} ${Math.abs(bps)}${atLeast ? "+" : ""}`);
 const moveColor = (bps: number) => (bps === 0 ? "#71717a" : bps < 0 ? SERIES.up : SERIES.down);
 
 export function FedProbability() {
@@ -84,7 +84,7 @@ export function FedProbability() {
   if (!policy) {
     return (
       <Panel title="Fed Rate Probability" tag="M1">
-        <PaneNotice down={down} what="Fed funds futures" />
+        <PaneNotice down={down} what="Fed rate probabilities" />
       </Panel>
     );
   }
@@ -97,16 +97,27 @@ export function FedProbability() {
           <span className="num text-ink-2">
             TGT {fmt(FED_TARGET.lower, 2)}–{fmt(FED_TARGET.upper, 2)} · EFFR {fmt(FED_TARGET.effr, 2)}
           </span>
-          <span>Fed funds futures unavailable — no free data feed reachable from this server carries CME futures.</span>
+          <span>Meeting probabilities unavailable — CME futures and Kalshi both not responding, retrying…</span>
         </div>
       </Panel>
     );
   }
+  const kalshi = policy.meetingsSource === "KALSHI";
   const daysUntil = (iso: string) => Math.max(0, Math.ceil((Date.parse(iso) - (now || Date.now())) / 86400_000));
   const next = FED_MEETINGS[0];
   const lead = next.cutProb >= next.hikeProb ? { label: "CUT", p: next.cutProb, cls: "text-up" } : { label: "HIKE", p: next.hikeProb, cls: "text-down" };
   return (
-    <Panel title="Fed Rate Probability" tag="M1" right={<SourceTag source="CME" title={`30-day fed funds futures (CBOT ZQ) via Yahoo Finance; EFFR ${policy.fed.effrAsOf} from FRED`} />} bodyClassName="cq gap-2">
+    <Panel
+      title="Fed Rate Probability"
+      tag="M1"
+      right={
+        <SourceTag
+          source={kalshi ? "KALSHI" : "CME"}
+          title={kalshi ? `Kalshi FOMC decision markets (bid/ask mid); EFFR ${policy.fed.effrAsOf} from FRED` : `30-day fed funds futures (CBOT ZQ) via Yahoo Finance; EFFR ${policy.fed.effrAsOf} from FRED`}
+        />
+      }
+      bodyClassName="cq gap-2"
+    >
       <div className="flex items-end justify-between gap-2">
         <div>
           <div className="num text-2xs text-ink-3">
@@ -129,16 +140,16 @@ export function FedProbability() {
 
       {/* Outcome meter for the next meeting */}
       <div>
-        <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-[2px]" role="img" aria-label={next.dist.map((d) => `${moveLabel(d.moveBps)} ${Math.round(d.prob * 100)}%`).join(", ")}>
+        <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-[2px]" role="img" aria-label={next.dist.map((d) => `${moveLabel(d.moveBps, d.atLeast)} ${Math.round(d.prob * 100)}%`).join(", ")}>
           {next.dist.map((d) => (
-            <div key={d.moveBps} style={{ width: `${d.prob * 100}%`, background: moveColor(d.moveBps) }} title={`${moveLabel(d.moveBps)}bp — ${fmt(d.prob * 100, 1)}%`} />
+            <div key={d.moveBps} style={{ width: `${d.prob * 100}%`, background: moveColor(d.moveBps) }} title={`${moveLabel(d.moveBps, d.atLeast)}bp — ${fmt(d.prob * 100, 1)}%`} />
           ))}
         </div>
         <div className="mt-1 flex justify-between">
           {next.dist.map((d) => (
             <span key={d.moveBps} className="num flex items-center gap-1 text-2xs text-ink-2">
               <span aria-hidden className="h-1.5 w-1.5 rounded-[1px]" style={{ background: moveColor(d.moveBps) }} />
-              {moveLabel(d.moveBps)} <span className="text-ink">{fmt(d.prob * 100, 0)}%</span>
+              {moveLabel(d.moveBps, d.atLeast)} <span className="text-ink">{fmt(d.prob * 100, 0)}%</span>
             </span>
           ))}
         </div>
@@ -150,7 +161,7 @@ export function FedProbability() {
           <thead>
             <tr className="text-2xs uppercase tracking-wide text-ink-3 [&>th]:border-b [&>th]:border-line [&>th]:py-0.5 [&>th]:font-medium">
               <th className="text-left">Meeting</th>
-              <th className="cq-wide text-right">Contract</th>
+              <th className="cq-wide text-right">{kalshi ? "Market" : "Contract"}</th>
               <th className="text-right">Implied</th>
               <th className="text-right">Δ bp</th>
               <th className="cq-wide w-28 pl-3 text-left">Most likely</th>
@@ -163,11 +174,13 @@ export function FedProbability() {
               return (
                 <tr key={m.date} className="border-b border-line/60 [&>td]:py-[3px]">
                   <td className="num text-ink-2">{shortDate(m.date)}</td>
-                  <td className="cq-wide num text-right text-ink-3">{m.contract} {fmt(m.futuresPrice, 3)}</td>
+                  <td className="cq-wide num text-right text-ink-3">
+                    {kalshi ? `KXFED ${m.contract}` : `${m.contract} ${m.futuresPrice != null ? fmt(m.futuresPrice, 3) : ""}`}
+                  </td>
                   <td className="num text-right text-ink">{fmt(m.impliedRate, 2)}</td>
                   <td className={cn("num text-right", dirClass(-delta))}>{fmtSigned(delta, 0)}</td>
                   <td className="cq-wide num pl-3 text-ink-2">
-                    {moveLabel(top.moveBps)} <span className="text-ink-3">{fmt(top.prob * 100, 0)}%</span>
+                    {moveLabel(top.moveBps, top.atLeast)} <span className="text-ink-3">{fmt(top.prob * 100, 0)}%</span>
                   </td>
                 </tr>
               );
@@ -175,7 +188,11 @@ export function FedProbability() {
           </tbody>
         </table>
       </div>
-      <p className="cq-wide shrink-0 text-2xs text-ink-3">Post-meeting rate solved from each contract's monthly average (100 − price); gap to EFFR split across adjacent 25bp outcomes.</p>
+      <p className="cq-wide shrink-0 text-2xs text-ink-3">
+        {kalshi
+          ? "Odds are each meeting's own decision, from Kalshi prediction-market prices. Implied = EFFR plus the expected move at each meeting so far (50+ counted as 50)."
+          : "Post-meeting rate solved from each contract's monthly average (100 − price); gap to EFFR split across adjacent 25bp outcomes."}
+      </p>
     </Panel>
   );
 }
