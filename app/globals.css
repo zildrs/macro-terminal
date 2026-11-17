@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: #09090b;
+  color: #f4f4f5;
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  -webkit-font-smoothing: antialiased;
+  /* Subtle terminal grid overlay */
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.num {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "zero" 1;
+}
+
+/* Thin, quiet scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*:focus-visible {
+  outline: 1px solid #f59e0b;
+  outline-offset: -1px;
+}
+
+.tape-track:hover {
+  animation-play-state: paused;
+}
+
+/* Recharts: keep focus rings off SVG surfaces */
+.recharts-wrapper *:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tape-track {
+    animation: none !important;
+  }
+}
+
+/* Container queries: widgets adapt to their pane, not the viewport */
+.cq {
+  container-type: inline-size;
+}
+.cq-size {
+  container-type: size;
+}
+@container (max-width: 560px) {
+  .cq-wide {
+    display: none !important;
+  }
+}
+@container (max-height: 250px) {
+  .cq-tall {
+    display: none !important;
+  }
+}
+@container (max-height: 340px) {
+  .cq-xtall {
+    display: none !important;
+  }
+}
+/* One column, two once the pane is wide enough for both tables side by side. */
+.cq-cols2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+@container (min-width: 820px) {
+  .cq-cols2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 20px;
+  }
+}

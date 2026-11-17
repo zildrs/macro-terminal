@@ -1,0 +1,12 @@
+node_modules
+.next
+out
+next-env.d.ts
+*.tsbuildinfo
+.env*.local
+.DS_Store
+.next-prod
+.env
+.env.production
+# SSH keys never belong in the repo
+*.pem
