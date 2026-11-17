@@ -90,6 +90,18 @@ export function FedProbability() {
   }
   const FED_TARGET = policy.fed;
   const FED_MEETINGS = policy.meetings;
+  if (!FED_MEETINGS.length) {
+    return (
+      <Panel title="Fed Rate Probability" tag="M1">
+        <div className="flex flex-1 flex-col items-center justify-center gap-1 px-3 text-center text-2xs text-ink-3" role="status">
+          <span className="num text-ink-2">
+            TGT {fmt(FED_TARGET.lower, 2)}–{fmt(FED_TARGET.upper, 2)} · EFFR {fmt(FED_TARGET.effr, 2)}
+          </span>
+          <span>Fed funds futures unavailable — no free data feed reachable from this server carries CME futures.</span>
+        </div>
+      </Panel>
+    );
+  }
   const daysUntil = (iso: string) => Math.max(0, Math.ceil((Date.parse(iso) - (now || Date.now())) / 86400_000));
   const next = FED_MEETINGS[0];
   const lead = next.cutProb >= next.hikeProb ? { label: "CUT", p: next.cutProb, cls: "text-up" } : { label: "HIKE", p: next.hikeProb, cls: "text-down" };
@@ -170,11 +182,11 @@ export function FedProbability() {
 
 // ---------------------------------------------------------------- Balance sheet visualizer
 
-const BENCHMARKS: Benchmark[] = ["SPX", "GOLD", "BTC"];
+const BENCHMARKS: Benchmark[] = ["SPY", "GLD", "BTC"];
 type Mode = "DUAL" | "INDEX";
 
 export function BalanceSheetChart() {
-  const [bench, setBench] = useState<Benchmark>("SPX");
+  const [bench, setBench] = useState<Benchmark>("SPY");
   const [mode, setMode] = useState<Mode>("DUAL");
   const nonce = useTerminal((s) => s.cursorNonce);
   const balance = useTerminal((s) => s.policy?.balance);
@@ -212,7 +224,7 @@ export function BalanceSheetChart() {
       tag="M1"
       right={
         <>
-          <SourceTag source="FRED" title="Total assets: FRED (WALCL, ECBASSETSW, JPNASSETS), ECB and BoJ converted to USD at each month's rate. Benchmarks: Yahoo Finance month-end closes." />
+          <SourceTag source="FRED" title="Total assets: FRED (WALCL, ECBASSETSW, JPNASSETS), ECB and BoJ converted to USD at each month's rate. Benchmarks: month-end closes of the SPY and GLD ETFs and Bitcoin (Kraken)." />
           <Segmented label="Benchmark" value={bench} options={BENCHMARKS} onChange={setBench} />
           <Segmented label="Scale mode" value={mode} options={["DUAL", "INDEX"] as const} onChange={setMode} />
         </>

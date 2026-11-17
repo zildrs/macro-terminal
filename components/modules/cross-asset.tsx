@@ -32,7 +32,11 @@ function loadCandles(symbol: string, tf: Timeframe): Promise<Loaded> {
   const hit = candleCache.get(key);
   if (hit && Date.now() - hit.at < CANDLE_TTL_MS) return hit.promise;
   const promise = fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}`, { cache: "no-store" })
-    .then((res) => (res.ok ? (res.json() as Promise<CandlesPayload>) : Promise.reject(new Error(String(res.status)))))
+    .then(async (res) => {
+      if (res.ok) return res.json() as Promise<CandlesPayload>;
+      const body = (await res.json().catch(() => ({}))) as { error?: string; unsupported?: boolean };
+      throw Object.assign(new Error(body.error ?? String(res.status)), { unsupported: !!body.unsupported });
+    })
     .then((body): Loaded => {
       if (!body.candles.length) throw new Error("no history");
       return { key, source: body.source, candles: body.candles };
@@ -64,6 +68,7 @@ export function AssetChart() {
   /** Key whose history failed to load; cleared on success. */
   const [failed, setFailed] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [failMsg, setFailMsg] = useState<string | null>(null);
 
   useEffect(() => setGroup(inst.group), [inst.group]);
 
@@ -77,10 +82,11 @@ export function AssetChart() {
         setFailed(null);
         setLoaded(res);
       },
-      () => {
+      (err: Error & { unsupported?: boolean }) => {
         if (!alive) return;
         setFailed(`${symbol}:${tf}`);
-        retry = setTimeout(() => setAttempt((n) => n + 1), RETRY_MS);
+        setFailMsg(err.unsupported ? err.message : null);
+        if (!err.unsupported) retry = setTimeout(() => setAttempt((n) => n + 1), RETRY_MS);
       },
     );
     return () => {
@@ -256,7 +262,7 @@ export function AssetChart() {
         />
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center text-2xs text-ink-3" role="status">
-            {failed === key ? `Price history for ${symbol} ${tf} is unavailable — retrying…` : `Loading ${symbol} ${tf}…`}
+            {failed === key ? (failMsg ?? `Price history for ${symbol} ${tf} is unavailable — retrying…`) : `Loading ${symbol} ${tf}…`}
           </div>
         )}
       </div>

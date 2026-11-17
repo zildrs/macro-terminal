@@ -3,7 +3,7 @@ import { clamp } from "./utils";
 
 // Calculations only — every input comes from a real feed (lib/fred.ts, lib/live.ts).
 
-export type Benchmark = "SPX" | "GOLD" | "BTC";
+export type Benchmark = "SPY" | "GLD" | "BTC";
 
 /** Net Liquidity = Fed Total Assets − TGA − RRP (USD trillions). */
 export function netLiquidity(fed: number, tga: number, rrp: number): number {

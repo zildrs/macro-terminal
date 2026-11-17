@@ -9,7 +9,7 @@ function Key({ children }: { children: React.ReactNode }) {
 }
 
 const FEEDS: { key: FeedKey; label: string; what: string }[] = [
-  { key: "quotes", label: "YAHOO", what: "Prices and candles — Yahoo Finance, delayed about 15 minutes" },
+  { key: "quotes", label: "PRICES", what: "ETF and FX prices — Twelve Data (or Yahoo Finance without a key); 10Y yield — FRED; Bitcoin — Kraken" },
   { key: "macro", label: "FRED", what: "Net liquidity and Treasury yields — FRED" },
   { key: "risk", label: "RISK", what: "Risk-on / risk-off inputs — FRED and Yahoo Finance" },
   { key: "policy", label: "BIS", what: "Policy rates and CPI — BIS; Fed range, balance sheets — FRED; fed funds futures — Yahoo Finance" },

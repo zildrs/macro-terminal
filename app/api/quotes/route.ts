@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
+import { getQuotes } from "@/lib/prices";
 import type { QuotesPayload } from "@/lib/types";
-import { getQuotes } from "@/lib/yahoo";
 
 export const dynamic = "force-dynamic";
 
-/** GET /api/quotes — latest (delayed) price and previous close per instrument. 503 when unreachable. */
+/** GET /api/quotes — latest price and previous close per instrument (any that are available). 503 when none are. */
 export async function GET() {
   const real = await getQuotes();
   if (!real) return NextResponse.json({ error: "source unavailable" }, { status: 503 });
-  const body: QuotesPayload = { source: "YAHOO", fetchedAt: real.fetchedAt, quotes: real.quotes };
+  const body: QuotesPayload = { source: real.provider, fetchedAt: real.fetchedAt, quotes: real.quotes };
   return NextResponse.json(body, { headers: { "Cache-Control": "no-store" } });
 }

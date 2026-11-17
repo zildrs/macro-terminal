@@ -85,7 +85,7 @@ export const useTerminal = create<TerminalState>((set, get) => {
 
   return {
     view: "overview",
-    activeSymbol: "SPX",
+    activeSymbol: "SPY",
     timeframe: "1D",
     paletteOpen: false,
     cursorNonce: 0,

@@ -1,42 +1,18 @@
-// Server-only: real, delayed market prices from Yahoo Finance's public chart endpoints.
-// Import from route handlers only.
+// Server-only: low-level client for Yahoo Finance's public chart endpoints. lib/prices.ts decides
+// when it is used (no Twelve Data key configured); lib/live.ts uses it for fed funds futures.
 //
-// These endpoints are unofficial: no key, no SLA, and Yahoo can change or throttle them at any
-// time. Quotes are typically delayed ~15 minutes for indices and futures. If a pull fails the
-// routes answer 503 and the panes show a retrying notice.
+// These endpoints are unofficial: no key, no SLA. Yahoo blocks many cloud-provider IP ranges
+// outright (every request answers 429), so on a VPS expect this client to fail.
 // Set YAHOO_DISABLED=1 to skip Yahoo entirely.
 
 import type { Candle, RealQuote, Timeframe } from "./types";
-import { cached } from "./server-cache";
-
-/** Terminal symbol → Yahoo ticker. Gold, silver and copper are the front COMEX futures, not spot. */
-export const YAHOO_SYMBOLS: Record<string, string> = {
-  US10Y: "^TNX",
-  DXY: "DX-Y.NYB",
-  SPX: "^GSPC",
-  GOLD: "GC=F",
-  "BTC/USD": "BTC-USD",
-  WTI: "CL=F",
-  "EUR/USD": "EURUSD=X",
-  "USD/JPY": "JPY=X",
-  "GBP/USD": "GBPUSD=X",
-  "USD/IDR": "IDR=X",
-  SILVER: "SI=F",
-  COPPER: "HG=F",
-  ES: "ES=F",
-  NQ: "NQ=F",
-  NKY: "^N225",
-  DAX: "^GDAXI",
-};
 
 // Two interchangeable hosts; a retry switches to the other one in case the first fails to resolve.
 const HOSTS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"];
 const HEADERS = { "User-Agent": "macro-terminal/0.1", Accept: "application/json" };
 const TIMEOUT_MS = 15_000;
-const QUOTE_TTL_MS = 30_000;
-const RETRY_MS = 5_000; // after a failed pull, how soon the next request may try again
 
-export const off = () => process.env.YAHOO_DISABLED === "1";
+export const yahooOff = () => process.env.YAHOO_DISABLED === "1";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -72,14 +48,14 @@ export interface YSeries {
   indicators?: { quote?: { open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[]; volume?: (number | null)[] }[] };
 }
 
-async function pullQuotes(): Promise<{ quotes: Record<string, RealQuote>; fetchedAt: string }> {
-  const tickers = Object.values(YAHOO_SYMBOLS);
+/** Latest price and previous close per Yahoo ticker. Throws if any ticker is missing. */
+export async function yahooQuotes(tickers: string[]): Promise<Record<string, RealQuote>> {
+  if (yahooOff()) throw new Error("Yahoo disabled");
   const url = `/v7/finance/spark?symbols=${tickers.map(encodeURIComponent).join(",")}&range=5d&interval=1d`;
   const body = (await getJson(url, "quotes")) as { spark?: { result?: { symbol: string; response?: YSeries[] }[] } };
   const byTicker = new Map((body.spark?.result ?? []).map((r) => [r.symbol, r.response?.[0]]));
-
-  const quotes: Record<string, RealQuote> = {};
-  for (const [symbol, ticker] of Object.entries(YAHOO_SYMBOLS)) {
+  const out: Record<string, RealQuote> = {};
+  for (const ticker of tickers) {
     const s = byTicker.get(ticker);
     const price = s?.meta.regularMarketPrice;
     if (!s || typeof price !== "number" || !(price > 0)) throw new Error(`Yahoo quotes: no price for ${ticker}`);
@@ -87,21 +63,18 @@ async function pullQuotes(): Promise<{ quotes: Record<string, RealQuote>; fetche
     const pct = s.meta.regularMarketChangePercent;
     const closes = (s.indicators?.quote?.[0]?.close ?? []).filter((c): c is number => typeof c === "number");
     const prevClose = typeof pct === "number" && pct > -100 ? price / (1 + pct / 100) : (closes[closes.length - 2] ?? price);
-    quotes[symbol] = { price, prevClose, time: s.meta.regularMarketTime ?? 0 };
+    out[ticker] = { price, prevClose, time: s.meta.regularMarketTime ?? 0 };
   }
-  return { quotes, fetchedAt: new Date().toISOString() };
+  return out;
 }
-
-/** Latest price and previous close for every instrument, or null when Yahoo is unreachable. */
-export const getQuotes = async () => (off() ? null : cached("yahoo:quotes", QUOTE_TTL_MS, pullQuotes, RETRY_MS));
 
 // ---------------------------------------------------------------- Candles
 
-const TF: Record<Timeframe, { range: string; interval: string; sec: number; ttl: number; keep: number }> = {
-  "1H": { range: "1mo", interval: "60m", sec: 3600, ttl: 5 * 60_000, keep: 500 },
-  "4H": { range: "3mo", interval: "60m", sec: 3600, ttl: 5 * 60_000, keep: 400 }, // built from hourly bars
-  "1D": { range: "2y", interval: "1d", sec: 86400, ttl: 10 * 60_000, keep: 520 },
-  "1W": { range: "5y", interval: "1wk", sec: 7 * 86400, ttl: 10 * 60_000, keep: 270 },
+const TF: Record<Timeframe, { range: string; interval: string; sec: number; keep: number }> = {
+  "1H": { range: "1mo", interval: "60m", sec: 3600, keep: 500 },
+  "4H": { range: "3mo", interval: "60m", sec: 3600, keep: 400 }, // built from hourly bars
+  "1D": { range: "2y", interval: "1d", sec: 86400, keep: 520 },
+  "1W": { range: "5y", interval: "1wk", sec: 7 * 86400, keep: 270 },
 };
 
 /** Fold `b` into the forming bar `a` (same period). */
@@ -158,8 +131,9 @@ export function parseCandles(series: YSeries, tf: Timeframe): Candle[] {
   return out.slice(-keep);
 }
 
-async function pullCandles(symbol: string, tf: Timeframe): Promise<Candle[]> {
-  const ticker = YAHOO_SYMBOLS[symbol];
+/** OHLCV history for one Yahoo ticker and timeframe. */
+export async function yahooCandles(ticker: string, tf: Timeframe): Promise<Candle[]> {
+  if (yahooOff()) throw new Error("Yahoo disabled");
   const { range, interval } = TF[tf];
   const url = `/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=${interval}`;
   const body = (await getJson(url, `candles ${ticker}`)) as { chart?: { result?: YSeries[]; error?: { description?: string } | null } };
@@ -170,12 +144,9 @@ async function pullCandles(symbol: string, tf: Timeframe): Promise<Candle[]> {
   return candles;
 }
 
-/** OHLCV history for one instrument and timeframe, or null when Yahoo is unreachable. */
-export const getCandles = async (symbol: string, tf: Timeframe) =>
-  off() || !YAHOO_SYMBOLS[symbol] ? null : cached(`yahoo:candles:${symbol}:${tf}`, TF[tf].ttl, () => pullCandles(symbol, tf), RETRY_MS);
-
 /** Closing prices keyed by exchange-local date, straight from Yahoo (not cached — callers cache). */
 export async function yahooCloses(ticker: string, range: string, interval: string): Promise<{ date: string; value: number }[]> {
+  if (yahooOff()) throw new Error("Yahoo disabled");
   const body = (await getJson(`/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=${interval}`, `closes ${ticker}`)) as {
     chart?: { result?: YSeries[] };
   };

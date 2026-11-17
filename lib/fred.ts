@@ -21,7 +21,7 @@ import type { CurvePoint, LiquidityPoint, MacroSeries, SpreadPoint } from "./typ
 import { netLiquidity } from "./macro";
 import type { RiskInputs, RiskKey } from "./risk";
 import { cached } from "./server-cache";
-import { yahooCloses } from "./yahoo";
+import { dailyCloses } from "./prices";
 
 const TTL_MS = 30 * 60_000; // weekly/daily data — no point refetching more often
 const TIMEOUT_MS = 15_000;
@@ -185,8 +185,8 @@ async function pullRisk(): Promise<RiskInputs & { fetchedAt: string }> {
   const start = isoDay(now - Math.round(2.45 * 365) * DAY); // 1y of scores, each with a 1y look-back
   const results = await Promise.all(RISK_IDS.map((id) => fetchObservations(id, start, end)));
   const by = Object.fromEntries(RISK_IDS.map((id, i) => [id, results[i]])) as Record<(typeof RISK_IDS)[number], Obs[]>;
-  // FRED now carries only one year of S&P 500 history, so the index itself comes from Yahoo.
-  const spx = (await yahooCloses("^GSPC", "5y", "1d")).filter((o) => o.date >= start);
+  // FRED carries only a year of S&P 500 history, so the SPY ETF stands in (Twelve Data, else Yahoo).
+  const spx = (await dailyCloses("SPY", 650)).filter((o) => o.date >= start);
 
   const dates = spx.map((o) => o.date);
   const on = (id: (typeof RISK_IDS)[number]) => asOf(by[id], dates);

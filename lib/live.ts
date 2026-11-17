@@ -3,14 +3,17 @@
 //
 //   BIS (stats.bis.org)            central bank policy rates, headline CPI y/y
 //   FRED                           Fed target range, EFFR, core CPI, Fed / ECB / BoJ total assets, FX
-//   Yahoo Finance                  30-day fed funds futures (ZQ), monthly benchmarks, flow-proxy ETFs
-//   CFTC (publicreporting.cftc.gov) Commitments of Traders: TFF and disaggregated reports
+//   Yahoo Finance                  30-day fed funds futures (ZQ) — optional, blocked on most cloud IPs
+//   lib/prices.ts                  ETF closes for the flow proxy and balance-sheet benchmarks
+//   CFTC (cftc.gov file archive)  Commitments of Traders: TFF and disaggregated reports
 //   Kraken                         BTC/USD order book and recent trades
 //   Forex Factory weekly export    economic calendar (forecast and previous; it carries no actuals)
 //   Fed / ECB / BoJ / CNBC RSS     headlines
 //
 // Each getter returns null when its source is unreachable; panes then say so instead of inventing data.
 
+import { connect } from "node:http2";
+import { inflateRawSync } from "node:zlib";
 import type {
   BalanceSheetPoint,
   Bias,
@@ -27,7 +30,8 @@ import { classifySentiment } from "./content";
 import { asOf, fetchObservations, type Obs } from "./fred";
 import { meetingFromRate } from "./macro";
 import { cached } from "./server-cache";
-import { getJson as yahooJson, yahooCloses, type YSeries } from "./yahoo";
+import { dailyCloses, monthlyCloses } from "./prices";
+import { getJson as yahooJson, type YSeries } from "./yahoo";
 
 const UA = { "User-Agent": "macro-terminal/0.1" };
 const DAY = 86400_000;
@@ -193,9 +197,9 @@ async function balanceSheets(now: number): Promise<BalanceSheetPoint[]> {
     fetchObservations("JPNASSETS", start, end), // JPY 100 millions
     fetchObservations("DEXUSEU", start, end), // USD per EUR
     fetchObservations("DEXJPUS", start, end), // JPY per USD
-    yahooCloses("^GSPC", "5y", "1mo"),
-    yahooCloses("GC=F", "5y", "1mo"),
-    yahooCloses("BTC-USD", "5y", "1mo"),
+    monthlyCloses("SPY", 66),
+    monthlyCloses("GLD", 66),
+    monthlyCloses("BTC/USD", 66),
   ]);
   // Month-end grid: the last 60 completed-or-current months, each read "as of" its final day.
   const ends: string[] = [];
@@ -210,14 +214,14 @@ async function balanceSheets(now: number): Promise<BalanceSheetPoint[]> {
   ends.forEach((date, i) => {
     const v = [f[i], e[i], b[i], fxE[i], fxJ[i], s[i], g[i], c[i]];
     if (v.some((x) => x === undefined)) return;
-    const [fed, ecbEur, bojJpy, eurusd, usdjpy, SPX, GOLD, BTC] = v as number[];
+    const [fed, ecbEur, bojJpy, eurusd, usdjpy, SPY, GLD, BTC] = v as number[];
     out.push({
       date: `${date.slice(0, 7)}-01`,
       fed: fed / 1e6,
       ecb: (ecbEur * eurusd) / 1e6,
       boj: bojJpy / usdjpy / 1e4, // (v × 1e8 JPY) / usdjpy / 1e12
-      SPX,
-      GOLD,
+      SPY,
+      GLD,
       BTC,
     });
   });
@@ -231,14 +235,13 @@ async function pullPolicy(): Promise<PolicyPayload> {
   const now = Date.now();
   const end = isoDay(now);
   const start2y = isoDay(now - 2 * 365 * DAY);
-  const [rates, cpi, upper, lower, effrObs, core, balance] = await Promise.all([
+  const [rates, cpi, upper, lower, effrObs, core] = await Promise.all([
     bisSeries("WS_CBPOL", `D.${BANKS.map((b) => b.area).join("+")}`, `startPeriod=${start2y}`),
     bisSeries("WS_LONG_CPI", `M.${BANKS.map((b) => b.area).join("+")}.771`, "lastNObservations=1"),
     fetchObservations("DFEDTARU", start2y, end),
     fetchObservations("DFEDTARL", start2y, end),
     fetchObservations("EFFR", isoDay(now - 30 * DAY), end),
     fetchObservations("CPILFESL", isoDay(now - 500 * DAY), end),
-    balanceSheets(now),
   ]);
 
   const banks: CentralBankRow[] = BANKS.map((b) => {
@@ -283,12 +286,26 @@ async function pullPolicy(): Promise<PolicyPayload> {
       effrAsOf: effr.date,
       coreCpi: Math.round(coreYoY * 10) / 10,
     },
-    meetings: await fedMeetingsFromFutures(effr.value, now),
-    balance,
+    meetings: [],
+    balance: [],
   };
 }
 
-export const getPolicy = () => cached("live:policy", 15 * MIN, pullPolicy, 20_000);
+const policyCore = () => cached("live:policy", 15 * MIN, pullPolicy, 20_000);
+const fedFutures = (effr: number) => cached("live:fedfutures", 15 * MIN, () => fedMeetingsFromFutures(effr, Date.now()), 60_000);
+const balanceHistory = () => cached("live:balance", 6 * 60 * MIN, () => balanceSheets(Date.now()), 60_000);
+
+/**
+ * Rates, CPI and the Fed range (BIS + FRED) are the core; fed funds futures (Yahoo only — no free
+ * keyed source carries CME futures) and the balance-sheet history are attached when available, so
+ * a failure in either leaves the rest of the policy panes working.
+ */
+export async function getPolicy(): Promise<PolicyPayload | null> {
+  const core = await policyCore();
+  if (!core) return null;
+  const [meetings, balance] = await Promise.all([fedFutures(core.fed.effr), balanceHistory()]);
+  return { ...core, meetings: meetings ?? [], balance: balance ?? [] };
+}
 
 // ---------------------------------------------------------------- CFTC Commitments of Traders
 
@@ -305,39 +322,117 @@ export const COT_DEFS: CotDef[] = [
 const COT_SHAPE = {
   // Traders in Financial Futures: real-money institutions vs hedge funds / CTAs.
   TFF: {
-    dataset: "gpe5-46if",
+    file: "fut_fin_txt",
     name: "Traders in Financial Futures",
     labels: ["Asset managers", "Leveraged funds"] as [string, string],
-    a: ["asset_mgr_positions_long", "asset_mgr_positions_short"],
-    b: ["lev_money_positions_long", "lev_money_positions_short"],
+    a: ["Asset_Mgr_Positions_Long_All", "Asset_Mgr_Positions_Short_All"],
+    b: ["Lev_Money_Positions_Long_All", "Lev_Money_Positions_Short_All"],
   },
   // Disaggregated report for physical commodities: commercial hedgers vs speculative funds.
   DISAGG: {
-    dataset: "72hh-3qpy",
+    file: "fut_disagg_txt",
     name: "Disaggregated",
     labels: ["Producers / merchants", "Managed money"] as [string, string],
-    a: ["prod_merc_positions_long", "prod_merc_positions_short"],
-    b: ["m_money_positions_long_all", "m_money_positions_short_all"],
+    a: ["Prod_Merc_Positions_Long_All", "Prod_Merc_Positions_Short_All"],
+    b: ["M_Money_Positions_Long_All", "M_Money_Positions_Short_All"],
   },
 };
 
+/** The single file inside a zip archive (CFTC's yearly archives hold one deflated .txt). */
+export function unzipSingle(buf: Buffer): Buffer {
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65_557); i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("zip: end of central directory not found");
+  const cd = buf.readUInt32LE(eocd + 16);
+  if (buf.readUInt32LE(cd) !== 0x02014b50) throw new Error("zip: bad central directory");
+  const method = buf.readUInt16LE(cd + 10);
+  const size = buf.readUInt32LE(cd + 20);
+  const local = buf.readUInt32LE(cd + 42);
+  const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+  const data = buf.subarray(start, start + size);
+  if (method === 0) return data;
+  if (method === 8) return inflateRawSync(data);
+  throw new Error(`zip: unsupported compression method ${method}`);
+}
+
+/**
+ * One year of a CFTC report, parsed. Fetched from the cftc.gov file archive rather than the
+ * publicreporting.cftc.gov API, which refuses many cloud-provider IP ranges.
+ */
+/**
+ * GET over HTTP/2. cftc.gov's CDN refuses Node's HTTP/1.1 clients (fetch and https) with a 403
+ * while accepting the same request, same User-Agent, over HTTP/2 — as curl sends it.
+ */
+function getH2(url: string, what: string, timeoutMs = 60_000): Promise<Buffer> {
+  const u = new URL(url);
+  return new Promise((resolve, reject) => {
+    const session = connect(u.origin);
+    const fail = (err: Error) => {
+      session.destroy();
+      reject(new Error(`${what}: ${err.message}`));
+    };
+    const timer = setTimeout(() => fail(new Error("timeout")), timeoutMs);
+    session.on("error", fail);
+    const req = session.request({ ":method": "GET", ":path": u.pathname + u.search, "user-agent": UA["User-Agent"] });
+    const chunks: Buffer[] = [];
+    req.on("response", (h) => {
+      const status = Number(h[":status"]);
+      if (status !== 200) {
+        clearTimeout(timer);
+        fail(new Error(`HTTP ${status}`));
+      }
+    });
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => {
+      clearTimeout(timer);
+      session.close();
+      resolve(Buffer.concat(chunks));
+    });
+    req.on("error", fail);
+    req.end();
+  });
+}
+
+async function cftcYear(file: string, year: number): Promise<{ head: string[]; rows: string[][] }> {
+  const zip = await getH2(`https://www.cftc.gov/files/dea/history/${file}_${year}.zip`, `CFTC ${file} ${year}`);
+  const rows = parseCsv(unzipSingle(zip).toString("latin1")).filter((r) => r.length > 3);
+  return { head: rows[0].map((h) => h.trim()), rows: rows.slice(1) };
+}
+
+const cftcFile = (file: string, year: number) => cached(`live:cftc:${file}:${year}`, 6 * 60 * MIN, () => cftcYear(file, year), 60_000);
+
 async function pullCot(def: CotDef): Promise<CotPayload> {
   const shape = COT_SHAPE[def.report];
-  const q = new URLSearchParams({
-    $select: ["report_date_as_yyyy_mm_dd", "market_and_exchange_names", ...shape.a, ...shape.b].join(","),
-    $where: `cftc_contract_market_code='${def.code}'`,
-    $order: "report_date_as_yyyy_mm_dd DESC",
-    $limit: "104",
-  });
-  const res = await get(`https://publicreporting.cftc.gov/resource/${shape.dataset}.json?${q}`, `CFTC ${def.key}`);
-  const rows = (await res.json()) as Record<string, string>[];
-  const net = (r: Record<string, string>, [l, s]: string[]) => (Number(r[l]) - Number(r[s])) / 1000;
-  const points = rows
-    .map((r) => ({ date: r.report_date_as_yyyy_mm_dd.slice(0, 10), a: net(r, shape.a), b: net(r, shape.b) }))
-    .filter((p) => Number.isFinite(p.a) && Number.isFinite(p.b))
-    .reverse();
-  if (points.length < 8) throw new Error(`CFTC ${def.key}: only ${points.length} reports`);
-  return { key: def.key, market: rows[0].market_and_exchange_names, report: shape.name, labels: shape.labels, points };
+  const year = new Date().getUTCFullYear();
+  const years = await Promise.all([year - 2, year - 1, year].map((y) => cftcFile(shape.file, y)));
+  const points: CotPayload["points"] = [];
+  let market = "";
+  for (const y of years) {
+    if (!y) continue; // e.g. this year's archive not published yet in early January
+    const col = (name: string) => {
+      const i = y.head.indexOf(name);
+      if (i < 0) throw new Error(`CFTC ${shape.file}: column ${name} missing`);
+      return i;
+    };
+    const [iCode, iDate, iName] = [col("CFTC_Contract_Market_Code"), col("Report_Date_as_YYYY-MM-DD"), col("Market_and_Exchange_Names")];
+    const [al, as, bl, bs] = [...shape.a, ...shape.b].map(col);
+    for (const r of y.rows) {
+      if (r[iCode]?.trim() !== def.code) continue;
+      const a = (Number(r[al]) - Number(r[as])) / 1000;
+      const b = (Number(r[bl]) - Number(r[bs])) / 1000;
+      if (Number.isFinite(a) && Number.isFinite(b)) points.push({ date: r[iDate].slice(0, 10), a, b });
+      market ||= r[iName].trim();
+    }
+  }
+  points.sort((x, y) => (x.date < y.date ? -1 : 1));
+  const dedup = points.filter((p, i) => i === 0 || p.date !== points[i - 1].date).slice(-104);
+  if (dedup.length < 8) throw new Error(`CFTC ${def.key}: only ${dedup.length} reports`);
+  return { key: def.key, market, report: shape.name, labels: shape.labels, points: dedup };
 }
 
 export const getCot = (key: string) => {
@@ -474,17 +569,14 @@ export const FLOW_DAYS = [1, 5, 21, 63];
  * that length. +2 means an unusually strong bid for the bucket, −2 unusually strong selling.
  */
 async function pullFlows(): Promise<{ rows: FlowRow[]; asOf: string }> {
-  const body = (await yahooJson(
-    `/v7/finance/spark?symbols=${FLOW_ETFS.map((f) => f[2]).join(",")}&range=1y&interval=1d`,
-    "flow ETFs",
-  )) as { spark?: { result?: { symbol: string; response?: YSeries[] }[] } };
-  const bySym = new Map((body.spark?.result ?? []).map((r) => [r.symbol, r.response?.[0]]));
-  let asOfTs = 0;
-  const rows = FLOW_ETFS.map(([cls, name, etf]) => {
-    const s = bySym.get(etf);
-    const px = (s?.indicators?.quote?.[0]?.close ?? []).filter((c): c is number => typeof c === "number" && c > 0);
+  let asOf = "";
+  const rows: FlowRow[] = [];
+  // Sequential: each ETF is one Twelve Data credit, and the client paces them under the per-minute limit.
+  for (const [cls, name, etf] of FLOW_ETFS) {
+    const obs = await dailyCloses(etf, 260);
+    const px = obs.map((o) => o.value).filter((v) => v > 0);
     if (px.length < 120) throw new Error(`flow ETFs: no history for ${etf}`);
-    asOfTs = Math.max(asOfTs, s?.timestamp?.at(-1) ?? 0);
+    if (obs[obs.length - 1].date > asOf) asOf = obs[obs.length - 1].date;
     const rets = px.slice(1).map((p, i) => Math.log(p / px[i]));
     const mean = rets.reduce((a, r) => a + r, 0) / rets.length;
     const sd = Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / rets.length) || 1e-9;
@@ -492,9 +584,10 @@ async function pullFlows(): Promise<{ rows: FlowRow[]; asOf: string }> {
       const r = Math.log(px[px.length - 1] / px[px.length - 1 - w]);
       return Math.round(Math.max(-3, Math.min(3, r / (sd * Math.sqrt(w)))) * 100) / 100;
     });
-    return { cls, name, etf, z };
-  });
-  return { rows, asOf: isoDay(asOfTs * 1000) };
+    rows.push({ cls, name, etf, z });
+  }
+  return { rows, asOf };
 }
 
-export const getFlows = () => cached("live:flows", 10 * MIN, pullFlows, 20_000);
+// Daily data: refreshed every 6 hours (13 credits each time on Twelve Data).
+export const getFlows = () => cached("live:flows", 6 * 60 * MIN, pullFlows, 2 * MIN);

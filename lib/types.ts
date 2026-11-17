@@ -34,13 +34,13 @@ export interface Candle {
 
 export type RegimeCode = "LIQUIDITY_EXPANSION" | "NEUTRAL" | "STAGFLATION" | "TIGHTENING";
 
-export type DataSource = "FRED" | "YAHOO" | "BIS" | "CFTC" | "KRAKEN" | "FF" | "RSS";
+export type DataSource = "FRED" | "YAHOO" | "TWELVEDATA" | "BIS" | "CFTC" | "KRAKEN" | "FF" | "RSS";
 
 /** A real (delayed) quote for one terminal instrument. */
 export interface RealQuote {
   price: number;
   prevClose: number;
-  /** Unix seconds of the last trade Yahoo reports. */
+  /** Unix seconds of the last trade or quote the source reports. */
   time: number;
 }
 
@@ -249,8 +249,8 @@ export interface BalanceSheetPoint {
   fed: number;
   ecb: number;
   boj: number;
-  SPX: number;
-  GOLD: number;
+  SPY: number;
+  GLD: number;
   BTC: number;
 }
 

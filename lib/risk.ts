@@ -27,7 +27,7 @@ interface RiskDef {
 }
 
 export const RISK_DEFS: RiskDef[] = [
-  { key: "SPX", label: "S&P 500", side: "ON", decimals: 0, unit: "", chgKind: "pct" },
+  { key: "SPX", label: "S&P 500 (SPY)", side: "ON", decimals: 0, unit: "", chgKind: "pct" },
   { key: "NDX", label: "Nasdaq", side: "ON", decimals: 0, unit: "", chgKind: "pct" },
   { key: "BTC", label: "Bitcoin", side: "ON", decimals: 0, unit: "", chgKind: "pct" },
   { key: "AUDJPY", label: "AUD/JPY", side: "ON", decimals: 2, unit: "", chgKind: "pct" },
@@ -103,7 +103,7 @@ function buildPillars(x: RiskInputs, macro: MacroSeries): RiskPillar[] {
       key: "trend",
       label: "Trend",
       state: gap > 2 ? "Uptrend" : gap < -2 ? "Downtrend" : "At 200d",
-      detail: `SPX ${signed(gap, 1, "%")} vs 200d`,
+      detail: `SPY ${signed(gap, 1, "%")} vs 200d`,
       tone: gap > 2 ? "on" : gap < -2 ? "off" : "neutral",
     },
     {
