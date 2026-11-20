@@ -12,7 +12,7 @@ DEPLOY_DIR="${DEPLOY_DIR:-app}"          # relative to the remote home directory
 APP_NAME="${APP_NAME:-dashboard}"
 APP_PORT="${APP_PORT:-3000}"
 DIST_DIR=".next-prod"                    # separate from .next so `npm run dev` keeps working
-PUBLIC_URL="http://${DEPLOY_HOST#*@}"
+PUBLIC_URL="https://${DEPLOY_HOST#*@}"
 
 cd "$(dirname "$0")"
 
