@@ -21,19 +21,20 @@ export function Runtime() {
     const feeds: [() => void, number][] = [
       [s.fetchQuotes, 30 * SEC],
       [s.fetchMacro, MIN],
-      [s.fetchRisk, 5 * MIN],
+      [s.fetchRisk, 15 * SEC], // live: Hyperliquid prices move the score between daily closes
       [s.fetchPolicy, 10 * MIN],
       [s.fetchCalendar, 30 * MIN],
       [s.fetchNews, 2 * MIN],
       [s.fetchFlows, 10 * MIN],
-      [s.touch, 15 * SEC],
+      [s.fetchFunding, 10 * MIN],
+      [s.touch, 5 * SEC],
     ];
     feeds.forEach(([run]) => run());
     const ids = feeds.map(([run, every]) => setInterval(run, every));
     // A feed that failed is retried every 10 seconds until it answers.
     const retry: Record<string, () => void> = {
       quotes: s.fetchQuotes, macro: s.fetchMacro, risk: s.fetchRisk, policy: s.fetchPolicy,
-      calendar: s.fetchCalendar, news: s.fetchNews, flows: s.fetchFlows,
+      calendar: s.fetchCalendar, news: s.fetchNews, flows: s.fetchFlows, funding: s.fetchFunding,
     };
     ids.push(
       setInterval(() => {

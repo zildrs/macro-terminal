@@ -2,75 +2,11 @@
 
 import { useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { BiasBadge, LegendDot, PaneNotice, Panel, Segmented, SourceTag } from "@/components/ui/panel";
+import { LegendDot, PaneNotice, Panel, Segmented, SourceTag } from "@/components/ui/panel";
 import { axisProps, ChartTip, cursorProps, GRID_STROKE, longDate, monthTick, SERIES, shortDate, stepTicks } from "@/components/ui/chart";
 import type { Benchmark } from "@/lib/macro";
 import { useTerminal } from "@/lib/store";
 import { cn, dirClass, fmt, fmtSigned } from "@/lib/utils";
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-/** "2026-09" → "Sep" */
-const monthName = (ym: string) => MONTHS[Number(ym.slice(5, 7)) - 1];
-
-// ---------------------------------------------------------------- Rate target matrix
-
-export function RateMatrix() {
-  const policy = useTerminal((s) => s.policy);
-  const down = useTerminal((s) => !!s.down.policy);
-  if (!policy) {
-    return (
-      <Panel title="Rate Target Matrix" tag="M1">
-        <PaneNotice down={down} what="Policy rates" />
-      </Panel>
-    );
-  }
-  return (
-    <Panel title="Rate Target Matrix" tag="M1" right={<SourceTag source="BIS" title="Policy rates and CPI: BIS. Fed target range: FRED." />} bodyClassName="cq p-0">
-      <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full border-collapse text-xs">
-          <thead className="sticky top-0 bg-panel">
-            <tr className="text-2xs uppercase tracking-wide text-ink-3 [&>th]:border-b [&>th]:border-line [&>th]:px-2 [&>th]:py-1 [&>th]:font-medium">
-              <th className="text-left">Bank</th>
-              <th className="text-right">Rate</th>
-              <th className="text-right">Last move</th>
-              <th className="text-right">CPI y/y</th>
-              <th className="text-right">Real</th>
-              <th className="text-right" title="From the direction of the last move, if it was within the past nine months">Stance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {policy.banks.map((b) => {
-              const real = b.rate - b.cpi;
-              return (
-                <tr key={b.code} className="border-b border-line/60 hover:bg-raised [&>td]:px-2 [&>td]:py-[5px]">
-                  <td>
-                    <span className="num font-semibold text-ink">{b.code}</span>
-                    <span className="cq-wide ml-2 text-ink-3">{b.bank}</span>
-                  </td>
-                  <td className="num whitespace-nowrap text-right text-ink">{b.rateLabel}%</td>
-                  <td className="num whitespace-nowrap text-right" title={`Last change took effect ${b.lastMoveDate}`}>
-                    <span className={dirClass(-b.lastMoveBps)}>{b.lastMoveBps === 0 ? "NONE" : `${fmtSigned(b.lastMoveBps, 0)}bp`}</span>
-                    <span className="ml-1.5 text-ink-3">{b.lastMoveBps === 0 ? "2y" : shortDate(b.lastMoveDate)}</span>
-                  </td>
-                  <td className="num whitespace-nowrap text-right text-ink-2">
-                    {fmt(b.cpi, 1)}%<span className="cq-wide ml-1.5 text-ink-3">{monthName(b.cpiAsOf)}</span>
-                  </td>
-                  <td className={cn("num text-right", real >= 0 ? "text-ink" : "text-warn")}>{fmtSigned(real, 2)}</td>
-                  <td className="text-right">
-                    <BiasBadge bias={b.bias} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="shrink-0 border-t border-line px-2 py-1 text-2xs text-ink-3">
-        Real = policy rate − CPI y/y. Fed shown at upper bound. Move colour: green = easing, red = tightening. Stance follows the last move.
-      </p>
-    </Panel>
-  );
-}
 
 // ---------------------------------------------------------------- Fed cut/hike probability
 

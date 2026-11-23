@@ -12,6 +12,7 @@ const FEEDS: { key: FeedKey; label: string; what: string }[] = [
   { key: "quotes", label: "PRICES", what: "ETF and FX prices — Twelve Data (or Yahoo Finance without a key); 10Y yield — FRED; Bitcoin — Kraken" },
   { key: "macro", label: "FRED", what: "Net liquidity and Treasury yields — FRED" },
   { key: "risk", label: "RISK", what: "Risk-on / risk-off inputs — FRED and Yahoo Finance" },
+  { key: "funding", label: "TIPS", what: "Real yields, breakevens, NFCI, SOFR and EFFR — FRED" },
   { key: "policy", label: "BIS", what: "Policy rates and CPI — BIS; Fed range, balance sheets — FRED; fed funds futures — Yahoo Finance" },
   { key: "flows", label: "ETF", what: "Flow proxy — ETF returns from Yahoo Finance" },
   { key: "calendar", label: "FF", what: "Economic calendar — Forex Factory weekly export" },
@@ -29,6 +30,7 @@ export function StatusBar() {
     calendar: !!s.calendar,
     news: !!s.news,
     book: !!s.book,
+    funding: !!s.funding,
   };
   const downCount = FEEDS.filter((f) => s.down[f.key]).length;
   return (

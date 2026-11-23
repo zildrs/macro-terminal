@@ -1,7 +1,7 @@
 import type { ViewId } from "./types";
 
 export type WidgetId =
-  | "rates"
+  | "realyields"
   | "fedprob"
   | "balance"
   | "netliq"
@@ -34,7 +34,7 @@ export const LAYOUTS: Record<ViewId, { id: WidgetId; cls: string }[]> = {
     { id: "netliq", cls: "xl:col-start-1 xl:col-span-4 xl:row-start-1 xl:row-span-2" },
     { id: "chart", cls: "xl:col-start-5 xl:col-span-5 xl:row-start-1 xl:row-span-2" },
     { id: "events", cls: "xl:col-start-10 xl:col-span-3 xl:row-start-3 xl:row-span-2" },
-    { id: "rates", cls: "xl:col-start-1 xl:col-span-4 xl:row-start-3 xl:row-span-2" },
+    { id: "realyields", cls: "xl:col-start-1 xl:col-span-4 xl:row-start-3 xl:row-span-2" },
     { id: "fedprob", cls: "xl:col-start-5 xl:col-span-2 xl:row-start-3 xl:row-span-2" },
     { id: "yield", cls: "xl:col-start-7 xl:col-span-3 xl:row-start-3 xl:row-span-2" },
     { id: "news", cls: "xl:col-start-10 xl:col-span-3 xl:row-start-5 xl:row-span-2" },
@@ -44,7 +44,7 @@ export const LAYOUTS: Record<ViewId, { id: WidgetId; cls: string }[]> = {
     { id: "orderflow", cls: "xl:col-start-8 xl:col-span-2 xl:row-start-5 xl:row-span-2" },
   ],
   cb: [
-    { id: "rates", cls: "xl:col-start-1 xl:col-span-7 xl:row-start-1 xl:row-span-3" },
+    { id: "realyields", cls: "xl:col-start-1 xl:col-span-7 xl:row-start-1 xl:row-span-3" },
     { id: "fedprob", cls: "xl:col-start-8 xl:col-span-5 xl:row-start-1 xl:row-span-3" },
     { id: "balance", cls: "xl:col-start-1 xl:col-span-12 xl:row-start-4 xl:row-span-3" },
   ],

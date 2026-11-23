@@ -153,6 +153,8 @@ export interface RiskIndicator {
   /** `z` capped at ±3 and signed so that positive always means risk-on. */
   signal: number;
   tone: Tone;
+  /** True when `value` is a live Hyperliquid nowcast rather than the last official close. */
+  live?: boolean;
 }
 
 export interface RiskPillar {
@@ -179,6 +181,8 @@ export interface RiskSnapshot {
   /** Market regime status, one line per pillar. */
   pillars: RiskPillar[];
   history: { date: string; score: number }[];
+  /** Set when some indicators carry live Hyperliquid prices: when they were taken. */
+  liveAt?: string;
 }
 
 export type Bias = "Hawkish" | "Dovish" | "Neutral";
@@ -303,4 +307,32 @@ export interface BookPayload {
   book: OrderBook;
   /** Net taker volume (buy − sell) per minute, oldest first, in base units. */
   deltas: number[];
+}
+
+/** Latest daily (or weekly) print, its date, and the change since the print a week earlier. */
+export interface FundingStat {
+  value: number;
+  date: string;
+  /** Change over one week, in bp (NFCI: index points). Null when the week-earlier print is missing. */
+  chg1w: number | null;
+}
+
+/** Real yields, breakevens, financial conditions and money-market spreads — all FRED. */
+export interface FundingPayload {
+  source: "FRED";
+  fetchedAt: string;
+  /** DFII10, percent. */
+  real10: FundingStat;
+  /** DFII5, percent. */
+  real5: FundingStat;
+  /** T10YIE, percent. */
+  breakeven10: FundingStat;
+  /** NFCI, index (0 = average conditions; positive = tighter than average). Weekly. */
+  nfci: FundingStat;
+  /** DGS2 − EFFR, bp. */
+  twoYearVsEffr: FundingStat;
+  /** SOFR − EFFR, bp. */
+  sofrVsEffr: FundingStat;
+  /** Trailing year of daily DFII10 and T10YIE, percent. */
+  history: { date: string; real: number; breakeven: number }[];
 }

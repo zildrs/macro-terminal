@@ -16,8 +16,12 @@
 //   BAMLH0A0HYM2  ICE BofA US high-yield OAS            — percent (shown as bp)
 //   DTWEXBGS   Nominal broad US dollar index, daily
 //   STLFSI4    St. Louis Fed financial stress index, weekly (0 = average stress)
+//   DFII5/10   TIPS (inflation-indexed) yields, daily   — percent
+//   T10YIE     10-year breakeven inflation, daily       — percent
+//   SOFR, EFFR overnight funding rates, daily           — percent
+//   NFCI       Chicago Fed financial conditions, weekly (0 = average; positive = tighter)
 
-import type { CurvePoint, LiquidityPoint, MacroSeries, SpreadPoint } from "./types";
+import type { CurvePoint, FundingPayload, FundingStat, LiquidityPoint, MacroSeries, SpreadPoint } from "./types";
 import { netLiquidity } from "./macro";
 import type { RiskInputs, RiskKey } from "./risk";
 import { cached } from "./server-cache";
@@ -221,6 +225,60 @@ async function pullRisk(): Promise<RiskInputs & { fetchedAt: string }> {
   return { dates: dates.slice(first), series, lastDates, fetchedAt: new Date(now).toISOString() };
 }
 
+// ---------------------------------------------------------------- Real yields & funding stress
+
+const FUNDING_IDS = ["DFII10", "DFII5", "T10YIE", "DGS2", "SOFR", "EFFR", "NFCI"] as const;
+type FundingId = (typeof FUNDING_IDS)[number];
+
+/** Latest print and the change against the latest print on or before seven days earlier. */
+function stat(obs: Obs[], scale: number, decimals = 1): FundingStat {
+  const last = obs[obs.length - 1];
+  const weekAgo = isoDay(Date.parse(last.date) - 7 * DAY);
+  const [prev] = asOf(obs, [weekAgo]);
+  const k = 10 ** decimals;
+  return { value: last.value, date: last.date, chg1w: prev === undefined ? null : Math.round((last.value - prev) * scale * k) / k };
+}
+
+/** `a − b` in bp on every date both series printed. */
+function spreadBp(a: Obs[], b: Obs[]): Obs[] {
+  const bBy = new Map(b.map((o) => [o.date, o.value]));
+  const out: Obs[] = [];
+  for (const o of a) {
+    const v = bBy.get(o.date);
+    if (v !== undefined) out.push({ date: o.date, value: Math.round((o.value - v) * 1000) / 10 });
+  }
+  return out;
+}
+
+async function pullFunding(): Promise<FundingPayload> {
+  const now = Date.now();
+  const end = isoDay(now);
+  const start = isoDay(now - 400 * DAY);
+  const results = await Promise.all(FUNDING_IDS.map((id) => fetchObservations(id, start, end)));
+  const by = Object.fromEntries(FUNDING_IDS.map((id, i) => [id, results[i]])) as Record<FundingId, Obs[]>;
+
+  const twoY = spreadBp(by.DGS2, by.EFFR);
+  const sofr = spreadBp(by.SOFR, by.EFFR);
+  if (!twoY.length || !sofr.length) throw new Error("FRED: no common dates for funding spreads");
+
+  const be = new Map(by.T10YIE.map((o) => [o.date, o.value]));
+  const yearAgo = isoDay(Date.parse(by.DFII10[by.DFII10.length - 1].date) - 365 * DAY);
+  const history = by.DFII10.filter((o) => o.date >= yearAgo && be.has(o.date)).map((o) => ({ date: o.date, real: o.value, breakeven: be.get(o.date) as number }));
+  if (history.length < 120) throw new Error("FRED: real-yield history too short");
+
+  return {
+    source: "FRED",
+    fetchedAt: new Date(now).toISOString(),
+    real10: stat(by.DFII10, 100),
+    real5: stat(by.DFII5, 100),
+    breakeven10: stat(by.T10YIE, 100),
+    nfci: stat(by.NFCI, 1, 3), // index points; it moves in thousandths
+    twoYearVsEffr: stat(twoY, 1),
+    sofrVsEffr: stat(sofr, 1),
+    history,
+  };
+}
+
 // ---------------------------------------------------------------- Cached entry points
 
 const off = () => process.env.FRED_DISABLED === "1";
@@ -229,3 +287,5 @@ const off = () => process.env.FRED_DISABLED === "1";
 export const getFredSeries = async () => (off() ? null : cached("fred:macro", TTL_MS, pullMacro));
 /** Inputs for the risk-on / risk-off score. Null when FRED is unreachable. */
 export const getFredRisk = async () => (off() ? null : cached("fred:risk", TTL_MS, pullRisk));
+/** Real yields, breakevens, NFCI and funding spreads. Null when FRED is unreachable. */
+export const getFredFunding = async () => (off() ? null : cached("fred:funding", TTL_MS, pullFunding));

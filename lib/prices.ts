@@ -105,7 +105,7 @@ export async function getQuotes(): Promise<{ quotes: Record<string, RealQuote>; 
     cached(`prices:${p}:fx`, fxTtl(), () => groupQuotes(FX_GROUP), GROUP_RETRY),
     cached(`prices:${p}:etf`, etfTtl(), () => groupQuotes(ETF_GROUP), GROUP_RETRY),
     cached("prices:us10y", 30 * MIN, us10y, GROUP_RETRY),
-    cached("prices:btc", 15_000, btc, 5_000),
+    cached("prices:btc", 15_000, btc, 5_000, { live: true }),
   ]);
   const quotes: Record<string, RealQuote> = {};
   if (fx) {
