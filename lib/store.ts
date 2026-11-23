@@ -5,6 +5,7 @@ import type {
   BookPayload,
   CalendarEvent,
   FlowRow,
+  FundingPayload,
   MacroPayload,
   MacroSeries,
   NewsItem,
@@ -17,7 +18,7 @@ import type {
 } from "./types";
 
 /** Feeds the terminal polls. A key is in `down` while its last request failed. */
-export type FeedKey = "quotes" | "macro" | "risk" | "policy" | "calendar" | "news" | "flows" | "book";
+export type FeedKey = "quotes" | "macro" | "risk" | "policy" | "calendar" | "news" | "flows" | "book" | "funding";
 
 interface TerminalState {
   // layout / navigation
@@ -41,6 +42,7 @@ interface TerminalState {
   news: NewsItem[] | null;
   flows: { rows: FlowRow[]; asOf: string } | null;
   book: BookPayload | null;
+  funding: FundingPayload | null;
   down: Partial<Record<FeedKey, boolean>>;
   /** Wall clock, refreshed every few seconds, for "x minutes ago" labels. 0 during SSR. */
   now: number;
@@ -61,6 +63,7 @@ interface TerminalState {
   fetchNews: () => Promise<void>;
   fetchFlows: () => Promise<void>;
   fetchBook: () => Promise<void>;
+  fetchFunding: () => Promise<void>;
 }
 
 async function getJson<T>(url: string): Promise<T> {
@@ -74,7 +77,7 @@ export const useTerminal = create<TerminalState>((set, get) => {
     if (!!get().down[key] !== failed) set({ down: { ...get().down, [key]: failed } });
   };
   /** Fetch one feed into one store field; on failure keep the last good value and flag the feed. */
-  const feed = <K extends "risk" | "policy" | "calendar" | "news" | "flows" | "book">(key: K, url: string) => async () => {
+  const feed = <K extends "risk" | "policy" | "calendar" | "news" | "flows" | "book" | "funding">(key: K, url: string) => async () => {
     try {
       set({ [key]: await getJson<TerminalState[K]>(url) } as Pick<TerminalState, K>);
       mark(key, false);
@@ -101,6 +104,7 @@ export const useTerminal = create<TerminalState>((set, get) => {
     news: null,
     flows: null,
     book: null,
+    funding: null,
     down: {},
     now: 0,
 
@@ -161,5 +165,6 @@ export const useTerminal = create<TerminalState>((set, get) => {
     fetchNews: feed("news", "/api/news"),
     fetchFlows: feed("flows", "/api/flows"),
     fetchBook: feed("book", "/api/orderbook"),
+    fetchFunding: feed("funding", "/api/funding"),
   };
 });

@@ -4,7 +4,8 @@ import { CommandPalette } from "./command-palette";
 import { Header } from "./header";
 import { Runtime } from "./runtime";
 import { StatusBar } from "./status-bar";
-import { BalanceSheetChart, FedProbability, RateMatrix } from "@/components/modules/central-bank";
+import { BalanceSheetChart, FedProbability } from "@/components/modules/central-bank";
+import { RealYieldsPanel } from "./real-yields-panel";
 import { AssetChart, CotTracker, OrderflowRadar } from "@/components/modules/cross-asset";
 import { EventStream, NewsFeed } from "@/components/modules/intel";
 import { CapitalFlowMatrix, NetLiquidityChart, YieldCurveRadar } from "@/components/modules/liquidity";
@@ -14,7 +15,7 @@ import { LAYOUTS, type WidgetId } from "@/lib/views";
 import { cn } from "@/lib/utils";
 
 const WIDGETS: Record<WidgetId, React.ComponentType> = {
-  rates: RateMatrix,
+  realyields: RealYieldsPanel,
   fedprob: FedProbability,
   balance: BalanceSheetChart,
   netliq: NetLiquidityChart,

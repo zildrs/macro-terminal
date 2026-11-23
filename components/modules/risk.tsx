@@ -98,11 +98,14 @@ function IndicatorTable({ title, rows }: { title: string; rows: RiskIndicator[] 
         <div
           key={r.key}
           role="row"
-          title={`${r.label}: ${fmtSigned(r.z, 2)}σ vs its 1-year average → ${TONE_WORD[r.tone]} signal (${fmtSigned(r.signal, 2)}). Latest ${r.asOf}.`}
+          title={`${r.label}: ${fmtSigned(r.z, 2)}σ vs its 1-year average → ${TONE_WORD[r.tone]} signal (${fmtSigned(r.signal, 2)}). ${r.live ? "Live via Hyperliquid; 1D = change since the last official close." : `Latest ${r.asOf}.`}`}
           className="flex h-[14px] items-center gap-2 text-2xs leading-none hover:bg-raised"
         >
-          <span role="rowheader" className="min-w-0 flex-1 truncate text-ink-2">
+          <span role="rowheader" className="flex min-w-0 flex-1 items-center gap-1 truncate text-ink-2">
             {r.label}
+            {r.live && (
+              <span className="h-1 w-1 shrink-0 animate-pulse rounded-full bg-up" title="Live: last close moved by Hyperliquid's price since then" aria-label="live" />
+            )}
           </span>
           <span role="cell" className="num w-14 shrink-0 text-right text-ink">
             {fmt(r.value, r.decimals)}
@@ -130,6 +133,20 @@ function IndicatorTable({ title, rows }: { title: string; rows: RiskIndicator[] 
 
 const SCORE_TICKS = [0, 20, 40, 60, 80, 100];
 
+function LiveTag({ at }: { at: string }) {
+  const now = useTerminal((s) => s.now);
+  const age = Math.max(0, Math.round(((now || Date.now()) - Date.parse(at)) / 1000));
+  return (
+    <span
+      className="num flex items-center gap-1 rounded-sm border border-up/40 bg-up/10 px-1 text-2xs leading-[14px] text-up"
+      title={`S&P 500, Nasdaq, Bitcoin and the dollar move live with Hyperliquid prices (taken ${new Date(at).toLocaleTimeString()}). VIX, HY spread, AUD/JPY and stress are daily FRED prints.`}
+    >
+      <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-up" />
+      LIVE{age >= 60 ? ` ${Math.round(age / 60)}m` : ""}
+    </span>
+  );
+}
+
 export function RiskRegime() {
   const risk = useTerminal((s) => s.risk);
   const nonce = useTerminal((s) => s.cursorNonce);
@@ -146,7 +163,17 @@ export function RiskRegime() {
   const neutralCount = risk.indicators.length - risk.onCount - risk.offCount;
 
   return (
-    <Panel title="Risk-On / Risk-Off" tag="M3" right={<SourceTag source={risk.source} asOf={risk.asOf} />} bodyClassName="cq-size gap-1.5">
+    <Panel
+      title="Risk-On / Risk-Off"
+      tag="M3"
+      right={
+        <>
+          {risk.liveAt && <LiveTag at={risk.liveAt} />}
+          <SourceTag source={risk.liveAt ? "FRED+HL" : risk.source} title={risk.liveAt ? "Daily history: FRED (and SPY closes). Live prices: Hyperliquid." : undefined} asOf={risk.asOf} />
+        </>
+      }
+      bodyClassName="cq-size gap-1.5"
+    >
       {/* Market regime status: headline */}
       <div className="flex shrink-0 items-center gap-2.5">
         <div
@@ -203,7 +230,7 @@ export function RiskRegime() {
           </ResponsiveContainer>
         </div>
         <p className="mt-0.5 shrink-0 text-[9px] leading-[11px] text-ink-3">
-          Signal = level vs its own 1-year average (σ), sign flipped for risk-off gauges. Green = risk-on, red = risk-off.
+          Signal = level vs its own 1-year average (σ), sign flipped for risk-off gauges. Green = risk-on, red = risk-off. Pulsing dot = live via Hyperliquid.
         </p>
       </div>
     </Panel>

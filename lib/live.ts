@@ -629,7 +629,7 @@ async function pullBook(): Promise<BookPayload> {
   return { symbol: "BTC/USD", venue: "Kraken", asOf: Date.now(), book: { asks: levels(book.asks), bids: levels(book.bids) }, deltas };
 }
 
-export const getBook = () => cached("live:book", 2_000, pullBook, 5_000);
+export const getBook = () => cached("live:book", 2_000, pullBook, 5_000, { live: true });
 
 // ---------------------------------------------------------------- Flow proxy: ETF return z-scores
 
