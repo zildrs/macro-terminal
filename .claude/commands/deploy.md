@@ -11,6 +11,6 @@ Deploy this project to `ubuntu@43.156.117.143` (`~/app`, PM2 app `dashboard`, po
    If it fails, show the failing step and the last lines of output, and stop.
 3. Run `ssh ubuntu@43.156.117.143 'pm2 status dashboard'` and confirm the app is `online`
    (use the same `-i` key as step 2 if one was needed).
-4. Run `curl -I http://43.156.117.143` and confirm the first line is `HTTP/1.1 200 OK`.
+4. Run `curl -I https://43.156.117.143` and confirm the first line is `HTTP/2 200` (plain `http://` answers `301` to HTTPS).
 5. Report: what was deployed, the PM2 status line, and the HTTP status. If anything is not 200/online,
    pull `pm2 logs dashboard --lines 50 --nostream` and say what it shows.
